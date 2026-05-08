@@ -1,3 +1,4 @@
 [tools]
+air = "latest"
 dprint = "latest"
 go = "latest"
