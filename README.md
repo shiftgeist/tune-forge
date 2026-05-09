@@ -1,3 +1,17 @@
 # Tune Forge
 
-> Forge your Spotify library based on the rules in your library.
+> Music library architect that forges your music catalog based on rules in your library.
+
+## Development
+
+Setup
+
+```sh
+mise install
+```
+
+Start dev
+
+```sh
+air
+```
