@@ -1,9 +1,7 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -32,36 +30,20 @@ func main() {
 	http.HandleFunc("/spotify/login", c.HandleLogin)
 	http.HandleFunc("/spotify/callback", c.HandleCallback)
 
-	http.HandleFunc("/", helloWorld(c))
+	http.HandleFunc("/", handleGetMe(c))
 
 	log.Println("Now listening to http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
-func helloWorld(c *auth.Client) http.HandlerFunc {
+func handleGetMe(c *auth.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		res, err := c.Http.Get("https://api.spotify.com/v1/me")
+		res, err := spotify.GetMe(c.Http)
 		if err != nil {
 			http.Error(w, err.Error(), 502)
 			return
 		}
-		if res.StatusCode > 299 {
-			http.Error(w, "Response failed", res.StatusCode)
-			return
-		}
 
-		body, err := io.ReadAll(res.Body)
-		res.Body.Close()
-		if err != nil {
-			http.Error(w, err.Error(), 422)
-			return
-		}
-
-		var dat spotify.User
-		if err := json.Unmarshal(body, &dat); err != nil {
-			log.Println(err)
-		}
-
-		fmt.Fprintf(w, "Welcome \"%s\"", dat.DisplayName)
+		fmt.Fprintf(w, "Welcome \"%s\"", res.DisplayName)
 	}
 }

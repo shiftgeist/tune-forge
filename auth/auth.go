@@ -19,7 +19,7 @@ type Client struct {
 	verifier    string
 	storagePath string
 
-	Http http.Client
+	Http *http.Client
 }
 
 func (c *Client) HandleLogin(w http.ResponseWriter, r *http.Request) {
@@ -38,7 +38,7 @@ func (c *Client) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c.saveSession(*tok)
-	c.Http = *oauth2.NewClient(ctx, newTokenSource(c, c.conf.TokenSource(ctx, tok)))
+	c.Http = oauth2.NewClient(ctx, newTokenSource(c, c.conf.TokenSource(ctx, tok)))
 	fmt.Fprintln(w, "You can close this now")
 }
 
@@ -75,7 +75,7 @@ func NewClient(conf *oauth2.Config) *Client {
 		return c
 	}
 
-	c.Http = *oauth2.NewClient(ctx, newTokenSource(c, conf.TokenSource(ctx, persistantTok)))
+	c.Http = oauth2.NewClient(ctx, newTokenSource(c, conf.TokenSource(ctx, persistantTok)))
 	return c
 }
 
