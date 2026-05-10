@@ -2,192 +2,220 @@
 
 ## 1. Overview
 
-A service that organizes a user's playlist library into **groups** with customizable rules. It enforces constraints (e.g., one-to-one or one-to-many memberships), auto-sorts songs based on metadata, and generates intersection playlists—all while using the **native playlist structure of the music service** as the source of truth.
+A service that organizes a user's playlist library into **groups** with customizable rules. It enforces membership constraints and generates intersection playlists — all while using **playlist descriptions** as the source of truth.
 
-The service is designed to be service agnostic and can support multiple services in parallel (e.g., Spotify, YouTube, Deezer, Tidal, SoundCloud). Initially, it will support **Spotify**.
+The service is designed to be service-agnostic and can support multiple services in parallel (e.g., Spotify, YouTube, Deezer, Tidal, SoundCloud). V1 targets **Spotify** only.
 
 **Key Principles**:
 
-- **Service-agnostic**: Designed to work with any music service that supports playlists and track metadata.
-- **Lightweight UI**: A minimal UI will be required for authentication, setup and normal operation for non-power users.
-- **Self-documenting**: Rules are defined in playlist descriptions.
+- **Service-agnostic**: Designed to work with any music service that supports playlists and track metadata. Services may have limited feature support — missing features result in disabled functionality, not errors.
+- **Self-documenting**: Rules are defined in playlist descriptions in a human-readable format.
+- **Opt-in**: No playlist is processed unless the user has explicitly opted it in during setup. The expected structure may be present, but nothing runs without the user's confirmation.
+- **Self-healing**: The system handles transient failures (e.g., rate limits) internally via retries and exponential backoff. Users are not notified of infrastructure-level issues.
+
+## V1
 
 ## 2. Core Features
 
 ### 2.1 Groups
 
-- Each **group** represents a category (e.g., `Energy`, `Genre`, `Occasion`).
-- Groups are defined by a special playlist (e.g., `🤖 {Group Name}`) with a **description** that defines the group’s rules.
+A **group** represents a category (e.g., `Energy`, `Genre`, `Occasion`).
+
+Groups are not a native concept in any supported music service. Instead, they are derived: a playlist declares its group membership in its description. On each sync, the service scans all opted-in playlists and assembles groups from these declarations.
 
 ### 2.2 Playlists
 
-#### 2.2.1 Group Playlist (`🤖 {Group Name}`)
+#### 2.2.1 Group Membership Declaration
 
-- **Purpose**: Defines the group’s rules and acts as a "drop zone" for unsorted songs.
-- **Description Format**:
-  ```
-  max_per_song={n},sort_by={metadata_key}
-  ```
-  - `max_per_song` (int):
-    - Maximum number of playlists a song can belong to in this group.
-    - `0` = unlimited (default).
-  - `sort_by` (string, optional):
-    - Metadata key (e.g., `energy`, `genre`, `danceability`).
-    - If set, songs added to `🤖 {Group Name}` are **auto-sorted** into sub-playlists based on this metadata.
+Any opted-in playlist declares its group and rules in its description. The syntax is human-readable — exact format TBD. Example:
+
+```
+group: Energy, max: 1 per song
+```
+
+- `group` — the group this playlist belongs to.
+- `max per song` — maximum number of playlists within the group a single song may appear in. Omitted means unlimited (no enforcement).
 
 #### 2.2.2 User Playlists
 
-- **Naming**: Any name (e.g., `High Energy`, `House`).
+Any name (e.g., `High Energy`, `House`). Rules declared in the description.
 
 #### 2.2.3 Auto-Generated Playlists
 
-| Playlist Name                  | Purpose                                                     | Trigger                                               |
-| ------------------------------ | ----------------------------------------------------------- | ----------------------------------------------------- |
-| `🤖❌ Error: Duplicate`        | Song appears in >`max_per_song` playlists in the group.     | Conflict detected during validation.                  |
-| `🤖❌ Error: Max {n} exceeded` | Song exceeds `max_per_song` limit.                          | Conflict detected during validation.                  |
-| `🤖❌ Error: Key not found`    | Song lacks the `sort_by` metadata.                          | Auto-sorting fails.                                   |
-| `🤖❌ Error: No match`         | Song’s metadata doesn’t match any sub-playlist.             | Auto-sorting fails.                                   |
-| `🤖❌ Error: {message}`        | Any error message.                                          | On error without message format.                      |
-| `🤖ℹ️ To be sorted`             | Temporary holding area for songs that can’t be auto-sorted. | `sort_by` is set but no matching sub-playlist exists. |
-| `🤖ℹ️ Que`                      | Temporary holding area for songs that can’t be auto-sorted. | `sort_by` is set but no matching sub-playlist exists. |
-| `🤖ℹ️ {info}`                   | Any info message.                                           | On info without message format.                       |
-| `🤖 {A} + {B}`                 | Intersection of songs from playlists `A` and `B`.           | User creates a playlist named `A + B`.                |
+| Playlist Name                  | Purpose                                                                 | Trigger                                    |
+| ------------------------------ | ----------------------------------------------------------------------- | ------------------------------------------ |
+| `🤖❌ Error: Duplicate`        | Song appears in more than 1 playlist in a group with `max: 1 per song`. | Conflict detected during validation.       |
+| `🤖❌ Error: Max {n} exceeded` | Song exceeds a `max: n per song` limit greater than 1.                  | Conflict detected during validation.       |
+| `🤖❌ Error: {message}`        | General error.                                                          | Any unclassified error.                    |
+| `🤖ℹ️ {info}`                   | General info message.                                                   | Any unclassified info state.               |
+| `🤖 {A} + {B}`                 | Intersection of songs from playlists A and B.                           | User creates a playlist named `{A} + {B}`. |
+
+### 2.3 Group Membership Note
+
+A track appearing in multiple playlists across groups is natural and expected — no enforcement applies unless `max per song` is explicitly set on a group. Unlimited membership is the default and requires no validation.
+
+There is no Spotify API endpoint to query which playlists contain a given track. The service builds this mapping itself by scanning all opted-in playlists and inverting the track index.
 
 ## 3. Workflows
 
-### 3.1 Validation
+### 3.1 Opt-In Setup
 
-**Trigger**: Manual or configured scheduled (e.g., daily).
-**Steps**:
+Before any sync or validation runs, the user explicitly opts playlists in via the setup step in the UI. Only opted-in playlists are scanned or modified.
 
-- For each **group**:
-  1. Fetch all sub-playlists and their songs.
-  2. For each song, count how many playlists it appears in within the group.
-  3. If `count > max_per_song` (and `max_per_song != 0`):
-     - Move the song to `🤖❌ Error: Max {n} exceeded` (or `🤖❌ Error: Duplicate` if `max_per_song=1`).
+### 3.2 Sync & Validation
 
-### 3.2 Generated Playlists
+**Trigger**: Manual or cron schedule.
 
-**Trigger**: When a user creates a `🤖` playlist with `+` in the name (e.g., `🤖 House + High Energy`).
-**Steps**:
+For each group assembled from opted-in playlists:
 
-1. Detect the `🤖` and `+` in the playlist name.
-2. Split the name into parts (e.g., `["House", "High Energy"]`).
-3. Find the playlists matching each part.
-4. Create a new playlist named `🤖 {Part1} + {Part2}`.
-5. Populate it with songs that appear in **all** source playlists (intersection).
+1. Fetch all member playlists and their tracks.
+2. Build a map of track → playlists it appears in within the group.
+3. If a track's count exceeds `max per song` (and the limit is set), move it to the appropriate error playlist.
+
+### 3.3 Generated (Intersection) Playlists
+
+**Trigger**: User creates a playlist named `{A} + {B}`.
+
+1. Detect the `+` pattern in the playlist name.
+2. Split into parts and find the matching opted-in playlists.
+3. Populate with songs that appear in **all** source playlists.
+
+Updates are triggered on manual sync or cron — not automatically on source playlist changes.
 
 ## 4. Music Service Integration
 
-### 4.1 Generic Requirements
+### 4.1 Common Interface
 
-The music service must support:
+Each supported music service implements a common interface covering:
 
-- **API**: The service must support some sort of read/write access via an api.
-- **Track Metadata**: Fetch metadata (e.g., `energy`, `genre`) for tracks.
-- **Playlists**: Create, read, update, and delete playlists.
-- **Playlist Metadata**: Read and write playlist descriptions.
-- **Batch Operations**: Add/remove multiple tracks from playlists in a single request (if possible).
+- Fetching opted-in playlists and their tracks
+- Reading and writing playlist descriptions
+- Creating, updating, and deleting playlists
+- Adding and removing tracks (batch where supported, sequential fallback)
+- Fetching track metadata
 
-### 4.2 Folder alternatives
+Services with limited capabilities implement what they can. Missing features disable the relevant UI functionality.
 
-If a service does not natively supported folders use prefix-named playlists (e.g., `Genre: House`).
+### 4.2 Track Metadata Caching
 
-## 5. Spotify-Specific Section
+Track metadata is cached by track ID with a long TTL — track metadata rarely changes and should be retained as long as possible. Invalidation is on-demand only.
 
-### 5.1 Spotify Requirements
+### 4.3 Rate Limiting
 
-- **Spotify Web API**: The only API needed for this service.
-- **Scopes**: Required scopes for Spotify:
-  - `playlist-read-private`
-  - `playlist-read-collaborative`
-  - `playlist-modify-private`
-  - `playlist-modify-public`
-  - `user-library-read`
+Handled internally via exponential backoff and silent retries. No user-facing notifications.
 
-### 5.2 Spotify API Endpoints
+### 4.4 Batch Operations
 
-| Feature             | Endpoint                                                              |
-| ------------------- | --------------------------------------------------------------------- |
-| Fetch playlists     | `GET /me/playlists`                                                   |
-| Get playlist tracks | `GET /playlists/{playlist_id}/tracks`                                 |
-| Get track metadata  | `GET /audio-features/{track_id}` (for `energy`, `danceability`, etc.) |
-| Create playlist     | `POST /users/{user_id}/playlists`                                     |
-| Add/remove tracks   | `POST/DELETE /playlists/{playlist_id}/tracks`                         |
+Batch API calls are preferred. Services without batch support fall back to sequential requests transparently.
 
-### 5.3 Folders in Spotify
+## 5. Spotify
 
-- Spotify supports **folders** as a way to organize playlists.
-- Folders can be treated as **groups** in this specification.
-- Spotify API does not support folders.
+### 5.1 Notes
 
-## 6. Other Music services
+- Spotify does not natively support folders. Groups are derived entirely from playlist descriptions.
+- No playlist name prefixes are used — this would disrupt the in-app experience.
+- There is no API endpoint to look up which playlists contain a given track. The service must build this by scanning opted-in playlists.
 
-### YouTube Music
+### 5.2 Required Scopes
 
-- Folders: Not natively supported. Use prefix-named playlists.
-- Metadata: Limited native metadata. May require external sources or manual tagging.
-- API: Use the YouTube Data API.
+- `playlist-read-private`
+- `playlist-read-collaborative`
+- `playlist-modify-private`
+- `playlist-modify-public`
+- `user-library-read`
 
-### Deezer, Tidal, SoundCloud
+### 5.3 Relevant Endpoints
 
-- Folders: Check service-specific documentation.
-- Metadata: Varies by service. Use available track attributes.
-- API: Use the respective service’s API.
+| Feature             | Endpoint                                      |
+| ------------------- | --------------------------------------------- |
+| Fetch playlists     | `GET /me/playlists`                           |
+| Get playlist tracks | `GET /playlists/{playlist_id}/tracks`         |
+| Get track metadata  | `GET /audio-features/{track_id}`              |
+| Create playlist     | `POST /users/{user_id}/playlists`             |
+| Add/remove tracks   | `POST/DELETE /playlists/{playlist_id}/tracks` |
 
-## 7. Data Storage
+## 6. Data Storage
 
-- **In-Memory Cache**: For temporary storage of track metadata and group rules.
-- **SQLite (Optional)**: For persistent storage of configuration, cached metadata, or user preferences.
+- **In-Memory Cache**: Assembled group state per sync cycle.
+- **Persistent Track Cache**: Track metadata stored persistently (SQLite or equivalent). Long TTL — invalidated on demand only.
+- **Opt-In List**: Persisted list of playlists the user has enabled. Storage mechanism TBD (SQLite or config file).
 
-## 8. Lightweight UI
+## 7. Lightweight UI
 
-- **Purpose**: Required for:
-  - Music service authentication (e.g., Spotify OAuth2 flow).
-  - Setup and configuration for non-power users.
-- **Implementation**: Minimal web interface.
+V1 UI covers:
 
-## 9. Future Ideas
+- Spotify OAuth2 authentication.
+- Opt-in setup: selecting which playlists to include in scanning.
+- Manual trigger for sync and validation.
 
-- **Extensible**: Supports custom metadata keys and validation logic.
-- **User playlist sorting**: For sub-playlists the description can define optional **song definitions** (e.g., `"energy>0.7"` for `High Energy`).
+## 8. Open Questions
 
-### Song Auto-Sorting
+1. **Opt-In Storage**: Where is the opt-in list persisted — SQLite, config file, or service-side (e.g., a dedicated playlist)?
+2. **Description Syntax**: Exact human-readable format for group declarations and rules. Needs a concrete decision before implementation.
 
-**Trigger**: When a song is added to `🤖 {Group Name}`.
-**Steps**:
+## V2
 
-1. Check if the group’s `🤖 {Group Name}` playlist has `sort_by` defined.
-2. If yes:
-   a. Fetch the song’s metadata (e.g., `energy` value).
-   b. Find the sub-playlist whose description matches the metadata (e.g., `energy>0.7` for `High Energy`).
-   c. If a match is found, move the song to that sub-playlist.
-   d. If no match is found:
-   - If a `🤖 To be sorted` playlist exists, move the song there.
-   - Else, create `🤖 To be sorted` and move the song.
-     e. If the song lacks the `sort_by` metadata, move to `🤖❌ Error: Key not found`.
+## 9. V2 Features
 
-## 10. Answered Questions
+### 9.1 Auto-Sorting
 
-1. **Dashboard Scope**: Should the dashboard be **read-only** or **interactive**?
+When a song is added to a drop-zone playlist with `sort by` defined in its description, the service automatically routes it to the correct sub-playlist based on track metadata.
 
-- Dashboard should be interactive.
+Description example:
 
-2. **Conflict Resolution**: If a song is in `🤖❌ Error: Duplicate`, should the backend **auto-resolve** it or leave it for manual resolution?
+```
+group: Energy, sort by: energy
+```
 
-- Conflict resolution is handled manually, by the user.
+Auto-generated playlists added in V2:
 
-3. **Folder Creation**: Should the backend **auto-create folders** for groups if they don’t exist?
+| Playlist Name               | Purpose                                                    | Trigger                                            |
+| --------------------------- | ---------------------------------------------------------- | -------------------------------------------------- |
+| `🤖❌ Error: Key not found` | Track lacks the `sort by` metadata key.                    | Auto-sorting fails — metadata key absent.          |
+| `🤖❌ Error: No match`      | Track's metadata doesn't match any sub-playlist.           | Auto-sorting fails — no matching playlist found.   |
+| `🤖ℹ️ To be sorted`          | Holding area for tracks that couldn't be auto-sorted.      | `sort by` set but no matching sub-playlist exists. |
+| `🤖ℹ️ Queue`                 | Holding area for tracks pending deferred async processing. | Track added while async processing is in progress. |
 
-- If confirmed or toggled on in the dashboard, the backend should auto-create folders.
+### 9.2 Async Queue
 
-4. **Error Playlist Naming**: Should error playlists (e.g., `🤖❌ Error: Duplicate`) be configurable or use a fixed naming scheme?
+Deferred and long-running operations (e.g., large auto-sort batches) are processed via a persistent queue that survives restarts. Tracks pending processing are surfaced in `🤖ℹ️ Queue`.
 
-- Preconfigured for now.
+### 9.3 Additional Music Services
 
-## 10. Open Questions
+V2 extends support beyond Spotify. All services implement the common interface from section 4.1. The UI remains service-agnostic — unsupported features are disabled per service.
 
-1. **Generated Playlist Updates**: Should `🤖 {A} + {B}` playlists **auto-update** when `A` or `B` changes, or only on manual trigger?
-2. **Multi-Service Support**: How should the service handle differences in API capabilities between music services (e.g., some may not support folders)?
-3. **Data Persistence**: Should metadata or configuration be stored in a local database (e.g., SQLite) for offline access or performance?
-4. **Rate Limiting**: How should the service handle rate limits imposed by music service APIs? Should it implement retries, caching, or user notifications?
+#### YouTube Music
+
+- Folders: Not natively supported. Group discovery via description scanning.
+- Metadata: Limited acoustic metadata. May require external sources or manual tagging.
+- API: YouTube Data API.
+
+#### Deezer
+
+- Folders: Natively supported via the API.
+- Metadata: BPM, gain, rank available. No acoustic features comparable to Spotify's audio features.
+- API: Deezer REST API.
+
+#### Tidal
+
+- Folders: Not natively supported. Group discovery via description scanning.
+- Metadata: Strong audio quality attributes (lossless, hi-res flags) but no energy/danceability equivalents.
+- API: Tidal API.
+
+#### SoundCloud
+
+- Folders: Not natively supported. Group discovery via description scanning.
+- Metadata: User-defined tags and genre only. No acoustic feature metadata.
+- API: SoundCloud API.
+
+### 9.4 Dashboard
+
+An interactive dashboard for:
+
+- Viewing group state and membership.
+- Inspecting and resolving conflicts (duplicate songs, max exceeded).
+- Managing opted-in playlists.
+
+### 9.5 Non-Power-User Flows
+
+Guided setup and simplified management for users unfamiliar with description syntax.
