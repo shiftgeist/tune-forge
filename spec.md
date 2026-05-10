@@ -119,6 +119,7 @@ If a service does not natively supported folders use prefix-named playlists (e.g
 
 - Spotify supports **folders** as a way to organize playlists.
 - Folders can be treated as **groups** in this specification.
+- Spotify API does not support folders.
 
 ## 6. Other Music services
 

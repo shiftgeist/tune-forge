@@ -31,6 +31,7 @@ func main() {
 	http.HandleFunc("/spotify/callback", c.HandleCallback)
 
 	http.HandleFunc("/", handleGetMe(c))
+	http.HandleFunc("/playlists", handleGetPlaylists(c))
 
 	log.Println("Now listening to http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
@@ -45,5 +46,17 @@ func handleGetMe(c *auth.Client) http.HandlerFunc {
 		}
 
 		fmt.Fprintf(w, "Welcome \"%s\"", res.DisplayName)
+	}
+}
+
+func handleGetPlaylists(c *auth.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		res, err := spotify.GetPlaylists(c.Http)
+		if err != nil {
+			http.Error(w, err.Error(), 502)
+			return
+		}
+
+		fmt.Fprintf(w, "Playlists %+v x", len(res))
 	}
 }
