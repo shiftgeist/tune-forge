@@ -6,40 +6,95 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/shiftgeist/tune-forge/auth"
+	"github.com/shiftgeist/tune-forge/service"
 )
 
-type Fetch interface {
-	Get(url string) (*http.Response, error)
+var _ service.Service = (*spotify)(nil)
+
+type spotify struct {
+	client *auth.Client
 }
 
-type Image struct {
-	Height int    `json:"height"`
-	Width  int    `json:"width"`
-	URL    string `json:"url"`
+func NewSpotifyService(clientId string, clientSecret string) *spotify {
+	c := auth.NewClient(&auth.Config{
+		ClientID:     clientId,
+		ClientSecret: clientSecret,
+		RedirectURL:  "http://127.0.0.1:8080/callback",
+		Scopes:       []string{"playlist-read-private", "playlist-read-collaborative", "playlist-modify-private", "playlist-modify-public", "user-library-read"},
+		Endpoint: auth.Endpoint{
+			AuthURL:  "https://accounts.spotify.com/authorize",
+			TokenURL: "https://accounts.spotify.com/api/token",
+		},
+	})
+
+	return &spotify{client: c}
 }
 
-type User struct {
-	DisplayName string  `json:"display_name"`
-	Id          string  `json:"id"`
-	Images      []Image `json:"images"`
+func (s *spotify) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/spotify/login", s.client.HandleLogin)
+	mux.HandleFunc("/spotify/callback", s.client.HandleCallback)
 }
 
-type Playlist struct {
-	Id     string     `json:"id"`
-	Name   string     `json:"name"`
-	Images []Image    `json:"images"`
-	Owner  User       `json:"owner"`
-	Tracks TracksLink `json:"tracks"`
+func (s *spotify) Me() (service.User, error) {
+	res, err := s.client.Http.Get("https://api.spotify.com/v1/me")
+	if err != nil {
+		return service.User{}, err
+	}
+	if res.StatusCode > 299 {
+		return service.User{}, errors.New("Not ok")
+	}
+
+	body, err := io.ReadAll(res.Body)
+	res.Body.Close()
+	if err != nil {
+		return service.User{}, err
+	}
+
+	var dat JsonUser
+	if err := json.Unmarshal(body, &dat); err != nil {
+		return service.User{}, err
+	}
+
+	imageUrl := ""
+	if len(dat.Images) > 0 {
+		imageUrl = dat.Images[0].URL
+	}
+
+	return service.User{
+		DisplayName: dat.DisplayName,
+		Id:          dat.Id,
+		AvatarUrl:   imageUrl,
+	}, nil
 }
 
-type PlaylistsMeta struct {
-	Next  string     `json:"next"`
-	Items []Playlist `json:"items"`
-}
+func (s *spotify) Playlists() ([]service.Playlist, error) {
+	var items []service.Playlist
 
-type TracksLink struct {
-	Href  string `json:"href"`
-	Total int    `json:"total"`
+	for url := "https://api.spotify.com/v1/me/playlists"; url != ""; {
+		page, err := fetchPage[JsonPlaylistsMeta](s.client.Http.Get, url)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, item := range page.Items {
+			imageUrl := ""
+			if len(item.Images) > 0 {
+				imageUrl = item.Images[0].URL
+			}
+
+			items = append(items, service.Playlist{
+				Id:       item.Id,
+				CoverUrl: imageUrl,
+				Name:     item.Name,
+			})
+		}
+
+		url = page.Next
+	}
+
+	return items, nil
 }
 
 func fetchPage[T any](fetcher func(url string) (*http.Response, error), url string) (T, error) {
@@ -62,40 +117,32 @@ func fetchPage[T any](fetcher func(url string) (*http.Response, error), url stri
 	return page, nil
 }
 
-func GetMe(fetch Fetch) (User, error) {
-	res, err := fetch.Get("https://api.spotify.com/v1/me")
-	if err != nil {
-		return User{}, err
-	}
-	if res.StatusCode > 299 {
-		return User{}, errors.New("Not ok")
-	}
-
-	body, err := io.ReadAll(res.Body)
-	res.Body.Close()
-	if err != nil {
-		return User{}, err
-	}
-
-	var dat User
-	if err := json.Unmarshal(body, &dat); err != nil {
-		return User{}, err
-	}
-
-	return dat, nil
+type JsonImage struct {
+	Height int    `json:"height"`
+	Width  int    `json:"width"`
+	URL    string `json:"url"`
 }
 
-func GetPlaylists(fetch Fetch) ([]Playlist, error) {
-	var items []Playlist
+type JsonUser struct {
+	DisplayName string      `json:"display_name"`
+	Id          string      `json:"id"`
+	Images      []JsonImage `json:"images"`
+}
 
-	for url := "https://api.spotify.com/v1/me/playlists"; url != ""; {
-		page, err := fetchPage[PlaylistsMeta](fetch.Get, url)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, page.Items...)
-		url = page.Next
-	}
+type JsonPlaylist struct {
+	Id     string         `json:"id"`
+	Name   string         `json:"name"`
+	Images []JsonImage    `json:"images"`
+	Owner  JsonUser       `json:"owner"`
+	Tracks JsonTracksLink `json:"tracks"`
+}
 
-	return items, nil
+type JsonPlaylistsMeta struct {
+	Next  string         `json:"next"`
+	Items []JsonPlaylist `json:"items"`
+}
+
+type JsonTracksLink struct {
+	Href  string `json:"href"`
+	Total int    `json:"total"`
 }

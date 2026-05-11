@@ -5,10 +5,9 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/joho/godotenv"
-	"github.com/shiftgeist/tune-forge/auth"
+	"github.com/shiftgeist/tune-forge/service"
 	"github.com/shiftgeist/tune-forge/spotify"
 )
 
@@ -17,29 +16,21 @@ func main() {
 		log.Fatal("Error loading .env file")
 	}
 
-	c := auth.NewClient(&auth.Config{
-		ClientID:     strings.TrimSpace(os.Getenv("SPOTIFY_CLIENT_ID")),
-		ClientSecret: strings.TrimSpace(os.Getenv("SPOTIFY_CLIENT_SECRET")),
-		RedirectURL:  "http://127.0.0.1:8080/callback",
-		Scopes:       []string{"playlist-read-private", "playlist-read-collaborative", "playlist-modify-private", "playlist-modify-public", "user-library-read"},
-		Endpoint: auth.Endpoint{
-			AuthURL:  "https://accounts.spotify.com/authorize",
-			TokenURL: "https://accounts.spotify.com/api/token",
-		},
-	})
-	http.HandleFunc("/spotify/login", c.HandleLogin)
-	http.HandleFunc("/spotify/callback", c.HandleCallback)
+	mux := http.NewServeMux()
 
-	http.HandleFunc("/", handleGetMe(c))
-	http.HandleFunc("/playlists", handleGetPlaylists(c))
+	serviceSpotify := spotify.NewSpotifyService(os.Getenv("SPOTIFY_CLIENT_ID"), os.Getenv("SPOTIFY_CLIENT_SECRET"))
+	serviceSpotify.RegisterRoutes(mux)
+
+	http.HandleFunc("/spotify/", handleGetMe(serviceSpotify))
+	http.HandleFunc("/spotify/playlists", handleGetPlaylists(serviceSpotify))
 
 	log.Println("Now listening to http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
-func handleGetMe(c *auth.Client) http.HandlerFunc {
+func handleGetMe(s service.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		res, err := spotify.GetMe(c.Http)
+		res, err := s.Me()
 		if err != nil {
 			http.Error(w, err.Error(), 502)
 			return
@@ -49,9 +40,9 @@ func handleGetMe(c *auth.Client) http.HandlerFunc {
 	}
 }
 
-func handleGetPlaylists(c *auth.Client) http.HandlerFunc {
+func handleGetPlaylists(s service.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		res, err := spotify.GetPlaylists(c.Http)
+		res, err := s.Playlists()
 		if err != nil {
 			http.Error(w, err.Error(), 502)
 			return
