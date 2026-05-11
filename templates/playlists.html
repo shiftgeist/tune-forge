@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Playlists</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body>
+    <table>
+      <tr>
+        <th class="p-4">Name</th>
+        <th class="p-4">ID</th>
+        <th class="p-4">Link</th>
+      </tr>
+      {{range .}}
+      <tr>
+        <td class="px-4"><img src="{{ .CoverUrl }}" alt="{{ .Id }} cover" width="100px"></td>
+        <td class="px-4">{{ .Name }}</td>
+        <td class="px-4">{{ .Id }}</td>
+      </tr>
+      {{else}}
+      <div><strong>no rows</strong></div>
+      {{end}}
+    </table>
+  </body>
+</html>

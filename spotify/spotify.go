@@ -14,7 +14,8 @@ import (
 var _ service.Service = (*spotify)(nil)
 
 type spotify struct {
-	client *auth.Client
+	client    *auth.Client
+	playlists []service.Playlist
 }
 
 func NewSpotifyService(clientId string, clientSecret string) *spotify {
@@ -94,6 +95,7 @@ func (s *spotify) Playlists() ([]service.Playlist, error) {
 		url = page.Next
 	}
 
+	s.playlists = items
 	return items, nil
 }
 

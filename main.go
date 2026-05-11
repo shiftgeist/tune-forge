@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"html/template"
 	"log"
 	"net/http"
 	"os"
@@ -48,6 +49,7 @@ func handleGetPlaylists(s service.Service) http.HandlerFunc {
 			return
 		}
 
-		fmt.Fprintf(w, "Playlists %+v x", len(res))
+		t, err := template.ParseFiles("templates/playlists.html")
+		err = t.Execute(w, res)
 	}
 }
