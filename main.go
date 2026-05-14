@@ -22,11 +22,22 @@ func main() {
 	serviceSpotify := spotify.NewSpotifyService(os.Getenv("SPOTIFY_CLIENT_ID"), os.Getenv("SPOTIFY_CLIENT_SECRET"))
 	serviceSpotify.RegisterRoutes(mux)
 
-	http.HandleFunc("/spotify/", handleGetMe(serviceSpotify))
-	http.HandleFunc("/spotify/playlists", handleGetPlaylists(serviceSpotify))
+	serviceSpotify.Routes().Me = "/spotify/"
+	mux.HandleFunc(serviceSpotify.Routes().Me, handleGetMe(serviceSpotify))
+
+	serviceSpotify.Routes().Playlists = "/spotify/playlists"
+	mux.HandleFunc(serviceSpotify.Routes().Playlists, handleGetPlaylists(serviceSpotify))
+
+	mux.HandleFunc("/", handleHome(serviceSpotify))
 
 	log.Println("Now listening to http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Fatal(http.ListenAndServe(":8080", mux))
+}
+
+func handleHome(s service.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "%+v", s.Routes())
+	}
 }
 
 func handleGetMe(s service.Service) http.HandlerFunc {

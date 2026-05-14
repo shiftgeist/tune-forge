@@ -3,7 +3,9 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,9 +20,10 @@ type Client struct {
 	conf        oauth2.Config
 	verifier    string
 	storagePath string
-
-	Http *http.Client
+	http        *http.Client
 }
+
+var ErrNotAuthenticated = errors.New("not authenticated")
 
 func (c *Client) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	url := c.conf.AuthCodeURL("state", oauth2.AccessTypeOffline, oauth2.S256ChallengeOption(c.verifier))
@@ -38,7 +41,7 @@ func (c *Client) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c.saveSession(*tok)
-	c.Http = oauth2.NewClient(ctx, newTokenSource(c, c.conf.TokenSource(ctx, tok)))
+	c.http = oauth2.NewClient(ctx, newTokenSource(c, c.conf.TokenSource(ctx, tok)))
 	fmt.Fprintln(w, "You can close this now")
 }
 
@@ -65,6 +68,20 @@ func (c *Client) getSession() (*oauth2.Token, error) {
 	return &dat, nil
 }
 
+func (c *Client) Get(url string) (*http.Response, error) {
+	if c.http == nil {
+		return nil, ErrNotAuthenticated
+	}
+	return c.http.Get(url)
+}
+
+func (c *Client) Post(url string, contentType string, body io.Reader) (*http.Response, error) {
+	if c.http == nil {
+		return nil, ErrNotAuthenticated
+	}
+	return c.http.Post(url, contentType, body)
+}
+
 func NewClient(conf *oauth2.Config) *Client {
 	ctx := context.Background()
 
@@ -75,7 +92,7 @@ func NewClient(conf *oauth2.Config) *Client {
 		return c
 	}
 
-	c.Http = oauth2.NewClient(ctx, newTokenSource(c, conf.TokenSource(ctx, persistantTok)))
+	c.http = oauth2.NewClient(ctx, newTokenSource(c, conf.TokenSource(ctx, persistantTok)))
 	return c
 }
 

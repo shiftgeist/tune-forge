@@ -16,6 +16,8 @@ var _ service.Service = (*spotify)(nil)
 type spotify struct {
 	client    *auth.Client
 	playlists []service.Playlist
+
+	routes service.Routes
 }
 
 func NewSpotifyService(clientId string, clientSecret string) *spotify {
@@ -30,16 +32,31 @@ func NewSpotifyService(clientId string, clientSecret string) *spotify {
 		},
 	})
 
-	return &spotify{client: c}
+	return &spotify{
+		client:    c,
+		playlists: []service.Playlist{},
+		routes: service.Routes{
+			Login:         "",
+			OAuthCallback: "",
+			Me:            "",
+			Playlists:     "",
+		}}
+}
+
+func (s *spotify) Routes() *service.Routes {
+	return &s.routes
 }
 
 func (s *spotify) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/spotify/login", s.client.HandleLogin)
-	mux.HandleFunc("/spotify/callback", s.client.HandleCallback)
+	s.routes.Login = "/spotify/login"
+	mux.HandleFunc(s.routes.Login, s.client.HandleLogin)
+
+	s.routes.OAuthCallback = "/spotify/callback"
+	mux.HandleFunc(s.routes.OAuthCallback, s.client.HandleCallback)
 }
 
 func (s *spotify) Me() (service.User, error) {
-	res, err := s.client.Http.Get("https://api.spotify.com/v1/me")
+	res, err := s.client.Get("https://api.spotify.com/v1/me")
 	if err != nil {
 		return service.User{}, err
 	}
@@ -74,7 +91,7 @@ func (s *spotify) Playlists() ([]service.Playlist, error) {
 	var items []service.Playlist
 
 	for url := "https://api.spotify.com/v1/me/playlists"; url != ""; {
-		page, err := fetchPage[JsonPlaylistsMeta](s.client.Http.Get, url)
+		page, err := fetchPage[JsonPlaylistsMeta](s.client.Get, url)
 		if err != nil {
 			return nil, err
 		}
