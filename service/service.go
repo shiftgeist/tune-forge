@@ -1,5 +1,10 @@
 package service
 
+import (
+	"errors"
+	"net/http"
+)
+
 type Routes struct {
 	Login         string
 	Me            string
@@ -20,7 +25,10 @@ type Playlist struct {
 }
 
 type Service interface {
+	RequireAuth(http.HandlerFunc) http.HandlerFunc
 	Routes() *Routes
 	Me() (User, error)
 	Playlists() ([]Playlist, error)
 }
+
+var ErrNotAuthenticated = errors.New("not authenticated")

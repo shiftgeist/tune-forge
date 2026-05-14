@@ -23,10 +23,10 @@ func main() {
 	serviceSpotify.RegisterRoutes(mux)
 
 	serviceSpotify.Routes().Me = "/spotify/"
-	mux.HandleFunc(serviceSpotify.Routes().Me, handleGetMe(serviceSpotify))
+	mux.HandleFunc(serviceSpotify.Routes().Me, serviceSpotify.RequireAuth(handleGetMe(serviceSpotify)))
 
 	serviceSpotify.Routes().Playlists = "/spotify/playlists"
-	mux.HandleFunc(serviceSpotify.Routes().Playlists, handleGetPlaylists(serviceSpotify))
+	mux.HandleFunc(serviceSpotify.Routes().Playlists, serviceSpotify.RequireAuth(handleGetPlaylists(serviceSpotify)))
 
 	mux.HandleFunc("/", handleHome(serviceSpotify))
 

@@ -24,7 +24,7 @@ func NewSpotifyService(clientId string, clientSecret string) *spotify {
 	c := auth.NewClient(&auth.Config{
 		ClientID:     clientId,
 		ClientSecret: clientSecret,
-		RedirectURL:  "http://127.0.0.1:8080/callback",
+		RedirectURL:  "http://127.0.0.1:8080/spotify/callback",
 		Scopes:       []string{"playlist-read-private", "playlist-read-collaborative", "playlist-modify-private", "playlist-modify-public", "user-library-read"},
 		Endpoint: auth.Endpoint{
 			AuthURL:  "https://accounts.spotify.com/authorize",
@@ -55,8 +55,18 @@ func (s *spotify) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc(s.routes.OAuthCallback, s.client.HandleCallback)
 }
 
+func (s *spotify) RequireAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.client.Http == nil {
+			http.Redirect(w, r, s.Routes().Login, http.StatusFound)
+			return
+		}
+		next(w, r)
+	}
+}
+
 func (s *spotify) Me() (service.User, error) {
-	res, err := s.client.Get("https://api.spotify.com/v1/me")
+	res, err := s.client.Http.Get("https://api.spotify.com/v1/me")
 	if err != nil {
 		return service.User{}, err
 	}
@@ -91,7 +101,7 @@ func (s *spotify) Playlists() ([]service.Playlist, error) {
 	var items []service.Playlist
 
 	for url := "https://api.spotify.com/v1/me/playlists"; url != ""; {
-		page, err := fetchPage[JsonPlaylistsMeta](s.client.Get, url)
+		page, err := fetchPage[JsonPlaylistsMeta](s.client.Http.Get, url)
 		if err != nil {
 			return nil, err
 		}
