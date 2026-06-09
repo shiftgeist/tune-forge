@@ -48,7 +48,7 @@ Any name (e.g., `High Energy`, `House`). Rules declared in the description.
 | `🤖❌ Error: Max {n} exceeded` | Song exceeds a `max: n per song` limit greater than 1.                  | Conflict detected during validation.       |
 | `🤖❌ Error: {message}`        | General error.                                                          | Any unclassified error.                    |
 | `🤖ℹ️ {info}`                   | General info message.                                                   | Any unclassified info state.               |
-| `🤖 {A} + {B}`                 | Intersection of songs from playlists A and B.                           | User creates a playlist named `{A} + {B}`. |
+| `🤖 {A} + {B}`                 | Union of songs from playlists A and B.                                  | User creates a playlist named `{A} + {B}`. |
 
 ### 2.3 Group Membership Note
 
