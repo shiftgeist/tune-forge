@@ -2,65 +2,148 @@
 
 ## 1. Overview
 
-A service that organizes a user's playlist library into **groups** with customizable rules. It enforces membership constraints and generates intersection playlists — all while using **playlist descriptions** as the source of truth.
+A service that organizes a user's playlist library with customizable rules. It
+enforces membership constraints and generates intersection playlists — all while
+using **playlist descriptions** as the source of truth.
 
-The service is designed to be service-agnostic and can support multiple services in parallel (e.g., Spotify, YouTube, Deezer, Tidal, SoundCloud). V1 targets **Spotify** only.
+The service is designed to be service-agnostic and can support multiple services
+in parallel (e.g., Spotify, YouTube, Deezer, Tidal, SoundCloud). V1 targets
+**Spotify** only.
 
 **Key Principles**:
 
-- **Service-agnostic**: Designed to work with any music service that supports playlists and track metadata. Services may have limited feature support — missing features result in disabled functionality, not errors.
-- **Self-documenting**: Rules are defined in playlist descriptions in a human-readable format.
-- **Opt-in**: No playlist is processed unless the user has explicitly opted it in during setup. The expected structure may be present, but nothing runs without the user's confirmation.
-- **Self-healing**: The system handles transient failures (e.g., rate limits) internally via retries and exponential backoff. Users are not notified of infrastructure-level issues.
+- **Service-agnostic**: Designed to work with any music service that supports
+  playlists and track metadata. Services may have limited feature support —
+  missing features result in disabled functionality, not errors.
+- **Self-documenting**: Rules are defined in playlist descriptions in a
+  human-readable format.
+- **Opt-in**: No playlist is processed unless the user has explicitly opted it
+  in during setup. The expected structure may be present, but nothing runs
+  without the user's confirmation.
+- **Self-healing**: The system handles transient failures (e.g., rate limits)
+  internally via retries and exponential backoff. Users are not notified of
+  infrastructure-level issues.
 
 ## V1
 
 ## 2. Core Features
 
-### 2.1 Groups
+### 2.1 Syntax
+
+Key-value pairs are embedded in the playlist description and can be mixed freely
+with natural language. The parser is case-insensitive and normalizes all keys
+and unquoted values to lowercase.
+
+**Token format**: `key:value` or `key:"value with spaces"`. A token is only
+parsed if `key` is a known key from the allowlist — unknown `word:value`
+patterns are treated as plain text.
+
+**Keys** are single words only (no hyphens or spaces). Aliases are supported
+(e.g., `g:` is equivalent to `group:`).
+
+**Repeated keys** are treated as a union — `group:dance group:pop` means the
+playlist belongs to both groups.
+
+**Quoted values** may use any matching quote pair (`"..."` or `'...'`). To
+include the matching quote character inside a value, escape it with a backslash
+(e.g., `key:"Felix\"s Mix"`).
+
+**Negation** is not supported in V1.
+
+#### Allowed keys
+
+| Key        | Description                                                        |
+| ---------- | ------------------------------------------------------------------ |
+| generate   | Generation mode, eg `generate:true`                                |
+| group      | Playlist group, `*` = all from library, eg `group:spin`            |
+| max        | Max playlists within the group a single song may appear in `max:1` |
+| popularity | Filter by popularity, eg `popularity:<30`                          |
+| release    | Filter by release date, eg `release:>2025-01-01`                   |
+
+##### Examples
+
+Union all playlists from group "spin" into a single playlist:
+`generate:true group:spin`
+
+Union all playlists from library in 2025 into a single playlist:
+`generate:true group:* release:2025-01-01..2026-01-01`
+
+#### Value types
+
+- Text — plain string, optionally quoted
+- Number — integer or decimal
+- Date — `YYYY-MM-DD`
+
+#### Value operators
+
+| Operator | Meaning            | Example               |
+| -------- | ------------------ | --------------------- |
+| `a..b`   | Inclusive range    | `popularity:20..80`   |
+| `>value` | GT                 | `release:>2020-01-01` |
+| `<value` | LE, alias for `0-` | `popularity:<30`      |
+
+#### UI
+
+A GitHub Advanced Search-style UI (<https://github.com/search/advanced>) is
+provided for building syntax expressions interactively. Output is a copyable
+description string — the UI does not write to playlists directly.
+
+Example description:
+
+```
+House Techno music for you. Also try house, electronic, edm, techno. group:dance group:electronic max:1
+```
+
+### 2.2 Groups
 
 A **group** represents a category (e.g., `Energy`, `Genre`, `Occasion`).
 
-Groups are not a native concept in any supported music service. Instead, they are derived: a playlist declares its group membership in its description. On each sync, the service scans all opted-in playlists and assembles groups from these declarations.
+Groups are not a native concept in any supported music service. Instead, they
+are derived: a playlist declares its group membership in its description. On
+each sync, the service scans all opted-in playlists and assembles groups from
+these declarations.
 
-### 2.2 Playlists
+### 2.3 Playlists
 
-#### 2.2.1 Group Membership Declaration
+#### 2.3.1 Group Membership Declaration
 
-Any opted-in playlist declares its group and rules in its description. The syntax is human-readable — exact format TBD. Example:
+Any opted-in playlist declares its group and rules in its description. The
+syntax is human-readable — exact format TBD. Example:
 
 ```
 group: Energy, max: 1 per song
 ```
 
-- `group` — the group this playlist belongs to.
-- `max per song` — maximum number of playlists within the group a single song may appear in. Omitted means unlimited (no enforcement).
-
-#### 2.2.2 User Playlists
+#### 2.3.2 User Playlists
 
 Any name (e.g., `High Energy`, `House`). Rules declared in the description.
 
-#### 2.2.3 Auto-Generated Playlists
+#### 2.3.3 Auto-Generated Playlists
 
 | Playlist Name                  | Purpose                                                                 | Trigger                                    |
 | ------------------------------ | ----------------------------------------------------------------------- | ------------------------------------------ |
 | `🤖❌ Error: Duplicate`        | Song appears in more than 1 playlist in a group with `max: 1 per song`. | Conflict detected during validation.       |
 | `🤖❌ Error: Max {n} exceeded` | Song exceeds a `max: n per song` limit greater than 1.                  | Conflict detected during validation.       |
 | `🤖❌ Error: {message}`        | General error.                                                          | Any unclassified error.                    |
-| `🤖ℹ️ {info}`                   | General info message.                                                   | Any unclassified info state.               |
+| `🤖ℹ️ {info}`                  | General info message.                                                   | Any unclassified info state.               |
 | `🤖 {A} + {B}`                 | Union of songs from playlists A and B.                                  | User creates a playlist named `{A} + {B}`. |
 
-### 2.3 Group Membership Note
+### 2.4 Group Membership Note
 
-A track appearing in multiple playlists across groups is natural and expected — no enforcement applies unless `max per song` is explicitly set on a group. Unlimited membership is the default and requires no validation.
+A track appearing in multiple playlists across groups is natural and expected —
+no enforcement applies unless `max per song` is explicitly set on a group.
+Unlimited membership is the default and requires no validation.
 
-There is no Spotify API endpoint to query which playlists contain a given track. The service builds this mapping itself by scanning all opted-in playlists and inverting the track index.
+There is no Spotify API endpoint to query which playlists contain a given track.
+The service builds this mapping itself by scanning all opted-in playlists and
+inverting the track index.
 
 ## 3. Workflows
 
 ### 3.1 Opt-In Setup
 
-Before any sync or validation runs, the user explicitly opts playlists in via the setup step in the UI. Only opted-in playlists are scanned or modified.
+Before any sync or validation runs, the user explicitly opts playlists in via
+the setup step in the UI. Only opted-in playlists are scanned or modified.
 
 ### 3.2 Sync & Validation
 
@@ -70,7 +153,8 @@ For each group assembled from opted-in playlists:
 
 1. Fetch all member playlists and their tracks.
 2. Build a map of track → playlists it appears in within the group.
-3. If a track's count exceeds `max per song` (and the limit is set), move it to the appropriate error playlist.
+3. If a track's count exceeds `max per song` (and the limit is set), move it to
+   the appropriate error playlist.
 
 ### 3.3 Generated (Intersection) Playlists
 
@@ -80,7 +164,8 @@ For each group assembled from opted-in playlists:
 2. Split into parts and find the matching opted-in playlists.
 3. Populate with songs that appear in **all** source playlists.
 
-Updates are triggered on manual sync or cron — not automatically on source playlist changes.
+Updates are triggered on manual sync or cron — not automatically on source
+playlist changes.
 
 ## 4. Music Service Integration
 
@@ -94,27 +179,34 @@ Each supported music service implements a common interface covering:
 - Adding and removing tracks (batch where supported, sequential fallback)
 - Fetching track metadata
 
-Services with limited capabilities implement what they can. Missing features disable the relevant UI functionality.
+Services with limited capabilities implement what they can. Missing features
+disable the relevant UI functionality.
 
 ### 4.2 Track Metadata Caching
 
-Track metadata is cached by track ID with a long TTL — track metadata rarely changes and should be retained as long as possible. Invalidation is on-demand only.
+Track metadata is cached by track ID with a long TTL — track metadata rarely
+changes and should be retained as long as possible. Invalidation is on-demand
+only.
 
 ### 4.3 Rate Limiting
 
-Handled internally via exponential backoff and silent retries. No user-facing notifications.
+Handled internally via exponential backoff and silent retries. No user-facing
+notifications.
 
 ### 4.4 Batch Operations
 
-Batch API calls are preferred. Services without batch support fall back to sequential requests transparently.
+Batch API calls are preferred. Services without batch support fall back to
+sequential requests transparently.
 
 ## 5. Spotify
 
 ### 5.1 Notes
 
-- Spotify does not natively support folders. Groups are derived entirely from playlist descriptions.
+- Spotify does not natively support folders. Groups are derived entirely from
+  playlist descriptions.
 - No playlist name prefixes are used — this would disrupt the in-app experience.
-- There is no API endpoint to look up which playlists contain a given track. The service must build this by scanning opted-in playlists.
+- There is no API endpoint to look up which playlists contain a given track. The
+  service must build this by scanning opted-in playlists.
 
 ### 5.2 Required Scopes
 
@@ -137,8 +229,10 @@ Batch API calls are preferred. Services without batch support fall back to seque
 ## 6. Data Storage
 
 - **In-Memory Cache**: Assembled group state per sync cycle.
-- **Persistent Track Cache**: Track metadata stored persistently (SQLite or equivalent). Long TTL — invalidated on demand only.
-- **Opt-In List**: Persisted list of playlists the user has enabled. Storage mechanism TBD (SQLite or config file).
+- **Persistent Track Cache**: Track metadata stored persistently (SQLite or
+  equivalent). Long TTL — invalidated on demand only.
+- **Opt-In List**: Persisted list of playlists the user has enabled. Storage
+  mechanism TBD (SQLite or config file).
 
 ## 7. Lightweight UI
 
@@ -150,8 +244,10 @@ V1 UI covers:
 
 ## 8. Open Questions
 
-1. **Opt-In Storage**: Where is the opt-in list persisted — SQLite, config file, or service-side (e.g., a dedicated playlist)?
-2. **Description Syntax**: Exact human-readable format for group declarations and rules. Needs a concrete decision before implementation.
+1. **Opt-In Storage**: Where is the opt-in list persisted — SQLite, config file,
+   or service-side (e.g., a dedicated playlist)?
+2. **Description Syntax**: Exact human-readable format for group declarations
+   and rules. Needs a concrete decision before implementation.
 
 ## V2
 
@@ -159,7 +255,9 @@ V1 UI covers:
 
 ### 9.1 Auto-Sorting
 
-When a song is added to a drop-zone playlist with `sort by` defined in its description, the service automatically routes it to the correct sub-playlist based on track metadata.
+When a song is added to a drop-zone playlist with `sort by` defined in its
+description, the service automatically routes it to the correct sub-playlist
+based on track metadata.
 
 Description example:
 
@@ -173,33 +271,40 @@ Auto-generated playlists added in V2:
 | --------------------------- | ---------------------------------------------------------- | -------------------------------------------------- |
 | `🤖❌ Error: Key not found` | Track lacks the `sort by` metadata key.                    | Auto-sorting fails — metadata key absent.          |
 | `🤖❌ Error: No match`      | Track's metadata doesn't match any sub-playlist.           | Auto-sorting fails — no matching playlist found.   |
-| `🤖ℹ️ To be sorted`          | Holding area for tracks that couldn't be auto-sorted.      | `sort by` set but no matching sub-playlist exists. |
-| `🤖ℹ️ Queue`                 | Holding area for tracks pending deferred async processing. | Track added while async processing is in progress. |
+| `🤖ℹ️ To be sorted`         | Holding area for tracks that couldn't be auto-sorted.      | `sort by` set but no matching sub-playlist exists. |
+| `🤖ℹ️ Queue`                | Holding area for tracks pending deferred async processing. | Track added while async processing is in progress. |
 
 ### 9.2 Async Queue
 
-Deferred and long-running operations (e.g., large auto-sort batches) are processed via a persistent queue that survives restarts. Tracks pending processing are surfaced in `🤖ℹ️ Queue`.
+Deferred and long-running operations (e.g., large auto-sort batches) are
+processed via a persistent queue that survives restarts. Tracks pending
+processing are surfaced in `🤖ℹ️ Queue`.
 
 ### 9.3 Additional Music Services
 
-V2 extends support beyond Spotify. All services implement the common interface from section 4.1. The UI remains service-agnostic — unsupported features are disabled per service.
+V2 extends support beyond Spotify. All services implement the common interface
+from section 4.1. The UI remains service-agnostic — unsupported features are
+disabled per service.
 
 #### YouTube Music
 
 - Folders: Not natively supported. Group discovery via description scanning.
-- Metadata: Limited acoustic metadata. May require external sources or manual tagging.
+- Metadata: Limited acoustic metadata. May require external sources or manual
+  tagging.
 - API: YouTube Data API.
 
 #### Deezer
 
 - Folders: Natively supported via the API.
-- Metadata: BPM, gain, rank available. No acoustic features comparable to Spotify's audio features.
+- Metadata: BPM, gain, rank available. No acoustic features comparable to
+  Spotify's audio features.
 - API: Deezer REST API.
 
 #### Tidal
 
 - Folders: Not natively supported. Group discovery via description scanning.
-- Metadata: Strong audio quality attributes (lossless, hi-res flags) but no energy/danceability equivalents.
+- Metadata: Strong audio quality attributes (lossless, hi-res flags) but no
+  energy/danceability equivalents.
 - API: Tidal API.
 
 #### SoundCloud
@@ -218,4 +323,5 @@ An interactive dashboard for:
 
 ### 9.5 Non-Power-User Flows
 
-Guided setup and simplified management for users unfamiliar with description syntax.
+Guided setup and simplified management for users unfamiliar with description
+syntax.
