@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Playlists</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="bg-gray-900 text-gray-100">
+    {{if .Status}}
+    <div class="w-full p-3 bg-sky-400 text-sky-800">{{ .Status }}</div>
+    {{end}} {{template "content" .}}
+  </body>
+</html>

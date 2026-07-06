@@ -1,6 +1,7 @@
 package main
 
 import (
+	"embed"
 	"fmt"
 	"html/template"
 	"log"
@@ -11,6 +12,11 @@ import (
 	"github.com/shiftgeist/tune-forge/service"
 	"github.com/shiftgeist/tune-forge/spotify"
 )
+
+//go:embed templates/*.html
+var templateFS embed.FS
+
+var tmpl = template.Must(template.ParseFS(templateFS, "templates/*.html"))
 
 func main() {
 	if err := godotenv.Load(); err != nil {
@@ -36,6 +42,13 @@ func main() {
 	log.Fatal(http.ListenAndServe(":8080", mux))
 }
 
+func render(w http.ResponseWriter, name string, data any) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.ExecuteTemplate(w, name, data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
 func handleHome(s service.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "%+v", s.Routes())
@@ -57,12 +70,20 @@ func handleGetMe(s service.Service) http.HandlerFunc {
 func handleGetPlaylists(s service.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		res, err := s.Playlists()
+		auth_status := r.URL.Query().Get("auth")
 		if err != nil {
 			http.Error(w, err.Error(), 502)
 			return
 		}
 
-		t, err := template.ParseFiles("templates/playlists.html")
-		err = t.Execute(w, res)
+		data := struct {
+			Status    string
+			Playlists []service.Playlist
+		}{
+			Status:    "Auth: " + auth_status,
+			Playlists: res,
+		}
+
+		render(w, "layout.html", data)
 	}
 }
