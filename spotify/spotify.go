@@ -48,7 +48,7 @@ func (s *spotify) Routes() *service.Routes {
 }
 
 func (s *spotify) RegisterRoutes(mux *http.ServeMux) {
-	s.routes.Login = "/spotify/login"
+	s.routes.Login = "/login"
 	mux.HandleFunc(s.routes.Login, s.client.HandleLogin)
 
 	s.routes.OAuthCallback = "/spotify/callback"

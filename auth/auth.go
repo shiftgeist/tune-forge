@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -38,7 +37,8 @@ func (c *Client) HandleCallback(w http.ResponseWriter, r *http.Request) {
 
 	c.saveSession(*tok)
 	c.Http = oauth2.NewClient(ctx, newTokenSource(c, c.conf.TokenSource(ctx, tok)))
-	fmt.Fprintln(w, "ok") // Todo: This isn't very helpful, maybe open login in new tab?
+
+	http.Redirect(w, r, "/spotify/playlists?auth=ok", http.StatusFound)
 }
 
 func (c *Client) saveSession(session oauth2.Token) error {

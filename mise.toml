@@ -2,3 +2,6 @@
 air = "latest"
 dprint = "latest"
 go = "latest"
+
+[tasks.dev]
+run = "air ."

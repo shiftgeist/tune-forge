@@ -20,6 +20,8 @@ func main() {
 	mux := http.NewServeMux()
 
 	serviceSpotify := spotify.NewSpotifyService(os.Getenv("SPOTIFY_CLIENT_ID"), os.Getenv("SPOTIFY_CLIENT_SECRET"))
+
+	// TODO: Just register all routes in here no RegisterRoutes
 	serviceSpotify.RegisterRoutes(mux)
 
 	serviceSpotify.Routes().Me = "/spotify/"
